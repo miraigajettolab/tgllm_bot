@@ -6,6 +6,7 @@ import subprocess
 import base64
 import requests
 import openai
+import datetime
 import numpy as np
 from telegram import Update
 from telegram.ext import (
@@ -21,17 +22,29 @@ logging.basicConfig(
 )
 
 openai.api_key = os.getenv("OPENAI_SECRET")
-ACCEPTED_USERS = [os.getenv("USER_CHAT_ID"), os.getenv("ADMIN_CHAT_ID")]
-CHARACTER_NAME = os.getenv("CHARACTER_NAME")
+TELEGRAM_SECRET = os.getenv("TELEGRAM_SECRET")
 
-with open(f"persona/{CHARACTER_NAME}.json", encoding="utf8") as persona_file:
-    PERSONA = json.load(persona_file)
-    CHARACTER = PERSONA["character"]
-    persona_file.close()
+WHITELIST_PATH = os.getenv("WHITELIST_PATH")
+CHARACTER_FILE_PATH = os.getenv("CHARACTER_FILE_PATH")
+CHAT_LOG_PATH = os.getenv("CHAT_LOG_PATH")
+INCIDENTS_LOG_PATH = os.getenv("INCIDENTS_LOG_PATH")
+
+OPENAI_LANGUAGE_MODEL = os.getenv("OPENAI_LANGUAGE_MODEL")
+TOKEN_LIMIT = int(os.getenv("TOKEN_LIMIT"))
+
+with open(WHITELIST_PATH) as whitelist_file:
+    accepted_user_ids = whitelist_file.read().splitlines()
+    whitelist_file.close()
+
+with open(CHARACTER_FILE_PATH, encoding="utf8") as character_file:
+    character_data = json.load(character_file)
+    default_responses = character_data["default_responses"]
+    character_name = character_data["name"]
+    system_prompt = character_data["prompt"]
+    character_file.close()
 
 context = []
 costs = []
-TOKEN_LIMIT = 2000
 
 
 def get_depth():
@@ -39,14 +52,14 @@ def get_depth():
     return len(arr[arr.cumsum() <= TOKEN_LIMIT].tolist())
 
 
-def prompt(chatId, prompt, isVoice=False):
+def prompt(chat_id, prompt, is_voice=False):
     user_prompt = {"role": "user", "content": prompt}
     context.append(user_prompt)
     depth = get_depth()
 
     result = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=CHARACTER
+        model=OPENAI_LANGUAGE_MODEL,
+        messages=system_prompt
         + context[
             -depth * 2 :
         ],  # x2 because context stores quesion and answer separately
@@ -59,11 +72,8 @@ def prompt(chatId, prompt, isVoice=False):
     costs.append(current_cost)
     context.append({"role": "assistant", "content": response})
 
-    current_line = f"{chatId}: {prompt}\n{CHARACTER_NAME}: {response}; cost: {cost}; current_cost: {current_cost}\n"
-    print(current_line)
-    with open(f"log.txt", "a") as log_file:
-        log_file.writelines(current_line)
-        log_file.close()
+    current_line = f"{chat_id}: {prompt}\n{character_name}: {response}; cost: {cost}; current_cost: {current_cost}\n"
+    log_to_file(CHAT_LOG_PATH, current_line)
 
     return response
 
@@ -73,33 +83,44 @@ def reset_context():
     costs.clear()
 
 
+def log_to_file(log_path, log_text):
+    timestamp = datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
+    with open(log_path, "a") as log_file:
+        log_file.writelines(f"{timestamp} {log_text}")
+        log_file.close()
+
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="Hi, I'm a virtual assistant, how can I help you?",
+        text=default_responses["welcome"],
     )
 
 
 async def reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reset_context()
     await context.bot.send_message(
-        chat_id=update.effective_chat.id, text="Chat history was reset"
+        chat_id=update.effective_chat.id, text=default_responses["history_reset"]
     )
 
 
 async def answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if str(update.effective_chat.id) in ACCEPTED_USERS:
+    if str(update.effective_chat.id) in accepted_user_ids:
         response = prompt(update.effective_chat.id, update.message.text)
         await context.bot.send_message(chat_id=update.effective_chat.id, text=response)
     else:
-        print("STRANGER!", update.effective_chat.id)
+        log_to_file(
+            INCIDENTS_LOG_PATH,
+            f"Message from unauthorized user with id: {update.effective_chat.id}",
+        )
         await context.bot.send_message(
-            chat_id=update.effective_chat.id, text="I'm not talking to strangers"
+            chat_id=update.effective_chat.id,
+            text=default_responses["unauthorized_user"],
         )
 
 
 async def answer_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if str(update.effective_chat.id) in ACCEPTED_USERS:
+    if str(update.effective_chat.id) in accepted_user_ids:
         # get basic info about the voice note file and prepare it for downloading
         new_file = await context.bot.get_file(update.message.voice.file_id)
         await new_file.download_to_drive("temp/voice.ogg")
@@ -108,25 +129,28 @@ async def answer_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             check=True,
             shell=True,
             stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
         )
         audio_file = open("temp/voice.mp3", "rb")
         transcript = openai.Audio.transcribe("whisper-1", audio_file)["text"]
-        response = prompt(update.effective_chat.id, transcript, isVoice=True)
+        response = prompt(update.effective_chat.id, transcript, is_voice=True)
 
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
-            text=f"You said:\n{transcript}\n------\n\n{response}",
+            text=f"{default_responses['voice_transcription_prefix']}:\n{transcript}\n------\n\n{response}",
         )
     else:
-        print("STRANGER_VOICE!", update.effective_chat.id)
+        log_to_file(
+            INCIDENTS_LOG_PATH,
+            f"Voice message from unauthorized user with id: {update.effective_chat.id}",
+        )
         await context.bot.send_message(
-            chat_id=update.effective_chat.id, text="Who is it?"
+            chat_id=update.effective_chat.id,
+            text=default_responses["unauthorized_user"],
         )
 
 
 if __name__ == "__main__":
-    application = ApplicationBuilder().token(os.getenv("TELEGRAM_TOKEN")).build()
+    application = ApplicationBuilder().token(TELEGRAM_SECRET).build()
 
     start_handler = CommandHandler("start", start)
     reset_handler = CommandHandler("reset", reset)

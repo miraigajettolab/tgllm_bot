@@ -1,0 +1,4 @@
+openai==0.27.0 
+google-cloud-texttospeech==2.14.1
+python-telegram-bot>=20.1
+numpy

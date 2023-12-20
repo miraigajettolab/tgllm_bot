@@ -1,0 +1,7 @@
+.vscode/
+logs/
+temp/
+
+.secret
+.whitelist
+*.json
