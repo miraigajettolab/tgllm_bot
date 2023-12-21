@@ -1,10 +1,7 @@
 import os
-import io
 import json
 import logging
 import subprocess
-import base64
-import requests
 import openai
 import datetime
 import numpy as np
