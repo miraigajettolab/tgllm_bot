@@ -5,6 +5,8 @@ TELEGRAM_SECRET=...
 OPENAI_SECRET=...
 ```
 
+## Put allowed telegram ids in the .whitelist file, with each id on a new line
+
 ## Edit other configs directly in the Dockerfile
 
 ## Put your system promt in the character.json file with the following structure
@@ -31,5 +33,5 @@ OPENAI_SECRET=...
 
 ```
 docker build -t tgllm_bot .
-docker run --env-file .secret --name tgllm_bot -d tgllm_bot
+docker run --env-file .secret --name tgllm_bot -d -v $(pwd):/bot tgllm_bot
 ```
