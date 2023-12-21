@@ -69,7 +69,7 @@ def prompt(chat_id, prompt, is_voice=False):
     costs.append(current_cost)
     context.append({"role": "assistant", "content": response})
 
-    current_line = f"{chat_id}: {prompt}\n{character_name}: {response}; cost: {cost}; current_cost: {current_cost}\n"
+    current_line = f"{chat_id}: {prompt}\n{character_name}: {response}\ncost: {cost}; current_cost: {current_cost}\n"
     log_to_file(CHAT_LOG_PATH, current_line)
 
     return response
@@ -82,7 +82,8 @@ def reset_context():
 
 def log_to_file(log_path, log_text):
     timestamp = datetime.datetime.now().astimezone().replace(microsecond=0).isoformat()
-    with open(log_path, "a") as log_file:
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    with open(log_path, "a+") as log_file:
         log_file.writelines(f"{timestamp} {log_text}")
         log_file.close()
 
@@ -120,6 +121,7 @@ async def answer_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if str(update.effective_chat.id) in accepted_user_ids:
         # get basic info about the voice note file and prepare it for downloading
         new_file = await context.bot.get_file(update.message.voice.file_id)
+        os.makedirs("temp", exist_ok=True)
         await new_file.download_to_drive("temp/voice.ogg")
         subprocess.run(
             "ffmpeg -y -i temp/voice.ogg -ar 44100 -b:a 192k temp/voice.mp3",
