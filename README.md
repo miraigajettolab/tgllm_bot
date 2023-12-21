@@ -29,9 +29,4 @@ OPENAI_SECRET=...
 }
 ```
 
-## Build&Run
-
-```
-docker build -t tgllm_bot .
-docker run --env-file .secret --name tgllm_bot -d -v $(pwd):/bot tgllm_bot
-```
+## (Re)build&Run with upgrade.sh
